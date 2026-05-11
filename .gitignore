@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local builds
+dist/
+build/
+*.spec
+
+# App runtime folders (keep datasets out of repo)
+data/
+runs/
+artifacts/
+checkpoints/
+projects/
+
+# Editor
+.vscode/
+.idea/
+
