@@ -15,6 +15,9 @@ runs/
 artifacts/
 checkpoints/
 projects/
+outputs/
+labels/
+images/
 
 # Editor
 .vscode/
