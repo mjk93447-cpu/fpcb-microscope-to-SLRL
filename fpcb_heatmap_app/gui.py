@@ -80,6 +80,8 @@ class FpcbHeatmapGUI(QWidget):
 
         root = QVBoxLayout()
 
+        # NOTE: Labeling UI will be introduced in Phase 2 by adding a dedicated labeling window.
+
         root.addLayout(self._path_row("Input Image/Folder:", "input_edit", self.pick_input))
         root.addLayout(self._path_row("Output Folder:", "output_edit", self.pick_output))
         root.addLayout(self._path_row("Model Checkpoint (optional):", "ckpt_edit", self.pick_ckpt, is_file=True))
