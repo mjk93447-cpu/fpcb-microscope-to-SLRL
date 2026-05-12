@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from PyQt5.QtWidgets import (
 from config import AppConfig
 from help_dialog import HelpDialog
 from io_utils import ensure_dir, list_images
+from labeling.labeling_dialog import LabelingDialog
 from pipeline import FpcbProcessor
 
 
@@ -80,7 +82,17 @@ class FpcbHeatmapGUI(QWidget):
 
         root = QVBoxLayout()
 
-        # NOTE: Labeling UI will be introduced in Phase 2 by adding a dedicated labeling window.
+        self.nested_chk = QCheckBox("Nested outputs (select <project>/outputs folder)")
+        self.export_gt_chk = QCheckBox("Copy labeled crack mask to outputs as *_gt_mask.png (nested only)")
+        root.addWidget(self.nested_chk)
+        root.addWidget(self.export_gt_chk)
+
+        self.label_btn = QPushButton("Open labeling…")
+        self.label_btn.clicked.connect(self.open_labeling)
+        row_top = QHBoxLayout()
+        row_top.addWidget(self.label_btn)
+        row_top.addStretch()
+        root.addLayout(row_top)
 
         root.addLayout(self._path_row("Input Image/Folder:", "input_edit", self.pick_input))
         root.addLayout(self._path_row("Output Folder:", "output_edit", self.pick_output))
@@ -220,7 +232,13 @@ class FpcbHeatmapGUI(QWidget):
             crack_weight=crack_weight,
             lead_weight=lead_weight,
             output_dir=Path(output_str),
+            nested_project_layout=self.nested_chk.isChecked(),
+            export_gt_mask_when_labeled=self.export_gt_chk.isChecked(),
         )
+
+    def open_labeling(self):
+        dlg = LabelingDialog(self)
+        dlg.exec_()
 
     def open_help(self):
         dlg = HelpDialog(self)

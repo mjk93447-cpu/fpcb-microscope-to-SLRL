@@ -107,10 +107,15 @@ class LabelMeta:
         )
 
     def touch_updated(self) -> None:
-        self.updated_at = datetime.now(timezone.utc).isoformat()
+        object.__setattr__(self, "updated_at", datetime.now(timezone.utc).isoformat())
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
+
+
+def label_meta_from_json(text: str) -> LabelMeta:
+    data = json.loads(text)
+    return LabelMeta(**data)
 
 
 def label_meta_path(project_root: Path, image_path: Path) -> Path:

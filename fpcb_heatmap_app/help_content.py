@@ -96,5 +96,34 @@ def get_help_sections() -> List[HelpSection]:
                 "- For a clean run, create a new output folder or clear the old one.\n"
             ),
         ),
+        HelpSection(
+            title="7) Labeling (GrabCut) SOP",
+            body=(
+                "Open 'Open labeling…' and select your project ROOT folder (not outputs/).\n"
+                "Click 'Create project folders' once.\n"
+                "Put raw microscopy files under: <project>/images/\n"
+                "Per image workflow:\n"
+                "- Select 'ROI rect', drag a rectangle around the crack region.\n"
+                "- Click 'Init GrabCut'.\n"
+                "- Use FG brush on crack pixels, BG brush on clearly non-crack pixels.\n"
+                "- Click 'Refine' as needed.\n"
+                "- Click 'Save label' → writes labels/masks/<name>.png + labels/meta/<name>.json\n"
+                "Draft masks auto-save every ~15s to labels/masks/<name>_draft.png while editing.\n"
+            ),
+        ),
+        HelpSection(
+            title="8) Training / evaluation (CLI)",
+            body=(
+                "After you have pairs: images/<file>.png and labels/masks/<same-stem>.png\n"
+                "Run from the fpcb_heatmap_app folder:\n"
+                "  python train.py --project-root <path-to-project>\n"
+                "Checkpoint: <project>/checkpoints/crack_deeplab_best.pt\n"
+                "Evaluate:\n"
+                "  python eval.py --project-root <path> --checkpoint <path-to-pt>\n"
+                "Use the checkpoint in the main window 'Model Checkpoint (optional)' field.\n"
+                "Optional: enable 'Nested outputs' and set Output Folder to <project>/outputs\n"
+                "  so overlays/heatmaps/segments/ and summary.csv are organized under outputs/.\n"
+            ),
+        ),
     ]
 
