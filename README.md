@@ -1,6 +1,6 @@
 # fpcb-microscope-to-SLRL
 
-Standalone Windows GUI for generating structured outputs (heatmap, segment polylines JSON, summary) from microscopic FPCB crack images, with **GrabCut-assisted labeling**, **CLI training/evaluation**, and optional **nested project outputs**.
+Standalone Windows GUI for generating structured outputs (heatmap, segment polylines JSON, summary) from microscopic FPCB crack images, with **GrabCut-assisted labeling**, **public lead pre-training**, **on-site lead calibration**, **3-class joint training**, and optional **nested project outputs**.
 
 ## Why a separate repo
 
@@ -29,20 +29,31 @@ Create via **Labeling → Create project folders** or manually:
 
 ```text
 <ProjectRoot>/
-  images/              # source microscopy images
-  labels/masks/        # crack PNG masks (0/255) + *_draft.png autosaves
-  labels/meta/         # JSON sidecar per image
-  outputs/             # optional nested batch outputs (see app checkbox)
-  checkpoints/         # training exports
-  runs/                # reserved for future logs
+  images/                      # source microscopy images
+  labels/masks/                # crack: <stem>.png ; lead: <stem>_lead.png ; drafts *_draft / *_lead_draft
+  labels/meta/                 # JSON per mask (<stem>.json crack, <stem>_lead.json lead)
+  outputs/                     # optional nested batch outputs (see app checkbox)
+  checkpoints/                 # training exports (2-class crack, 3-class joint, lead calibration)
+  runs/                        # reserved for future logs
+```
+
+Public bundles for **lead pre-training** (keep outside git):
+
+```text
+<PublicBundle>/
+  images/
+  labels/lead_masks/           # PNG masks, same stem as images/
+  checkpoints/                 # created by pretrain_lead_public.py (default output location)
 ```
 
 ## Iteration loop (quality + stability)
 
-1. **Label** a small, hard subset first; verify masks on a few known OK/NG cases.
-2. **Train** (`train.py`), then **eval** (`eval.py`); load `checkpoints/crack_deeplab_best.pt` in the main GUI.
-3. **Batch infer** with nested outputs if you want `outputs/overlays|heatmaps|segments/` + `summary.csv`.
-4. Re-open ambiguous images in labeling; drafts auto-save every ~15s while editing.
+1. **Pre-train lead** on a public `images/` + `labels/lead_masks/` bundle (`pretrain_lead_public.py`); ship `lead_public_3c_best.pt` with the tool or line image server.
+2. **Label** cracks (`labels/masks/<stem>.png`) and, where needed, **lead** (`<stem>_lead.png`) for reflectance calibration; verify on known OK/NG cases.
+3. **Calibrate** lead on-site: `train.py --mode calibrate-lead --init-checkpoint <public.pt>` (short epochs, backbone frozen).
+4. **Joint train** when crack masks exist: `train.py --mode joint` → `segmentation_deeplab_3c_best.pt`; **eval** with `eval.py --mode joint`.
+5. **Batch infer** with nested outputs; load the 3-class checkpoint in the GUI for DL-assisted lead/crack maps.
+6. Re-open ambiguous images in labeling; drafts auto-save every ~15s while editing.
 
 ## CI
 

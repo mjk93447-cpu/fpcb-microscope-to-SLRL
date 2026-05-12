@@ -10,7 +10,7 @@ from config import AppConfig
 from heatmap import colorize_heatmap, draw_segments_overlay, generate_heatmap
 from inference import SegmentationInference
 from io_utils import append_summary_csv, save_image, save_segments_json
-from labeling.label_io import mask_path_for_image
+from labeling.label_io import crack_mask_path, lead_mask_path
 from postprocess import collect_segments
 from project_layout import build_project_paths, ensure_project_dirs
 
@@ -109,10 +109,14 @@ class FpcbProcessor:
 
         if self.config.export_gt_mask_when_labeled and self.config.nested_project_layout:
             pr = output_dir.parent.resolve()
-            gt = mask_path_for_image(pr, image_path)
+            gt = crack_mask_path(pr, image_path)
             if gt.exists():
                 dst = pp.outputs_overlays_dir / f"{stem}_gt_mask.png"
                 shutil.copyfile(gt, dst)
+            gt_lead = lead_mask_path(pr, image_path)
+            if gt_lead.exists():
+                dst_l = pp.outputs_overlays_dir / f"{stem}_gt_lead_mask.png"
+                shutil.copyfile(gt_lead, dst_l)
 
         return ProcessResult(
             image_name=image_path.name,

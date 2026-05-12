@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -24,9 +25,16 @@ from PyQt5.QtWidgets import (
 
 from io_utils import IMAGE_EXTENSIONS
 from labeling.grabcut_engine import GrabCutState, apply_scribbles, gc_mask_to_binary, init_grabcut, refine_grabcut
-from labeling.label_io import draft_mask_path, load_mask_if_any, save_draft_mask, save_label
+from labeling.label_io import (
+    crack_mask_path,
+    draft_lead_mask_path,
+    lead_mask_path,
+    load_mask_if_any,
+    save_draft_mask,
+    save_label,
+)
 from labeling.overlay_render import blend_mask_bgr
-from project_layout import LabelMeta, build_project_paths, ensure_project_dirs, label_meta_path
+from project_layout import LabelMeta, build_project_paths, ensure_project_dirs, label_meta_path, label_meta_path_lead
 
 
 class Tool(Enum):
@@ -61,7 +69,8 @@ class LabelImageWidget(QWidget):
             self._pixmap = None
             return
         mask = self._c._mask_preview
-        vis = blend_mask_bgr(img, mask) if mask is not None else img
+        color = self._c._mask_overlay_color_bgr()
+        vis = blend_mask_bgr(img, mask, color_bgr=color) if mask is not None else img
         rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888).copy()
@@ -143,6 +152,15 @@ class LabelingDialog(QDialog):
         top.addWidget(btn_init)
         root.addLayout(top)
 
+        kind_row = QHBoxLayout()
+        kind_row.addWidget(QLabel("Mask type:"))
+        self._combo_mask_kind = QComboBox()
+        self._combo_mask_kind.addItems(["Crack", "Lead (copper wire)"])
+        self._last_mask_kind_idx = 0
+        self._combo_mask_kind.currentIndexChanged.connect(self._on_mask_kind_changed)
+        kind_row.addWidget(self._combo_mask_kind, 1)
+        root.addLayout(kind_row)
+
         mid = QHBoxLayout()
         self._list = QListWidget()
         self._list.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -197,8 +215,8 @@ class LabelingDialog(QDialog):
         root.addLayout(mid, 1)
 
         self._hint = QLabel(
-            "Choose project → Create folders → add images under images/ → ROI rect → Init GrabCut → "
-            "FG/BG brushes → Refine → Save. Draft auto-saves every 15s while editing."
+            "Choose project → Create folders → add images under images/ → pick Mask type (Crack vs Lead) → "
+            "ROI rect → Init GrabCut → FG/BG brushes → Refine → Save. Draft auto-saves every 15s while editing."
         )
         self._hint.setWordWrap(True)
         root.addWidget(self._hint)
@@ -207,6 +225,26 @@ class LabelingDialog(QDialog):
         self._timer.setInterval(15000)
         self._timer.timeout.connect(self._autosave_draft)
         self._timer.start()
+
+    def _current_label_kind(self) -> str:
+        return "lead" if self._combo_mask_kind.currentIndex() == 1 else "crack"
+
+    def _mask_overlay_color_bgr(self) -> tuple[int, int, int]:
+        return (0, 200, 255) if self._current_label_kind() == "lead" else (0, 0, 255)
+
+    def _on_mask_kind_changed(self, idx: int) -> None:
+        old = self._last_mask_kind_idx
+        self._last_mask_kind_idx = int(idx)
+        if self._dirty and self._project_root and self._images and self._mask_preview is not None:
+            pr = Path(self._project_root)
+            ip = self._current_image_path()
+            old_kind = "lead" if old == 1 else "crack"
+            try:
+                save_draft_mask(pr, ip, self._mask_preview, label_kind=old_kind)
+            except OSError:
+                pass
+        if self._images:
+            self._load_current_image()
 
     def _set_tool(self, t: Tool) -> None:
         self._tool = t
@@ -260,7 +298,8 @@ class LabelingDialog(QDialog):
         self._image_bgr = img
         self._gc_state = None
         pr = Path(self._project_root)
-        self._mask_preview = load_mask_if_any(pr, Path(path))
+        kind = self._current_label_kind()
+        self._mask_preview = load_mask_if_any(pr, Path(path), label_kind=kind)
         self._canvas.refresh()
 
     def _current_image_path(self) -> Path:
@@ -353,24 +392,27 @@ class LabelingDialog(QDialog):
             return
         pr = Path(self._project_root)
         ip = self._current_image_path()
-        mask_path = pr / "labels" / "masks" / f"{ip.stem}.png"
+        kind = self._current_label_kind()
+        mask_path = crack_mask_path(pr, ip) if kind == "crack" else lead_mask_path(pr, ip)
+        meta_path = label_meta_path(pr, ip) if kind == "crack" else label_meta_path_lead(pr, ip)
+        classes = ["crack"] if kind == "crack" else ["lead"]
         meta = LabelMeta.new(
             image_path=ip,
             project_root=pr,
             mask_png_path=mask_path,
-            classes=["crack"],
-            tool={"name": "fpcb-microscope-to-SLRL", "version": "0.2"},
+            classes=classes,
+            tool={"name": "fpcb-microscope-to-SLRL", "version": "0.3"},
             grabcut={"roi": self._pending_rect},
         )
-        save_label(pr, ip, self._mask_preview, meta)
-        dp = draft_mask_path(pr, ip)
+        save_label(pr, ip, self._mask_preview, meta, label_kind=kind)
+        dp = draft_crack_mask_path(pr, ip) if kind == "crack" else draft_lead_mask_path(pr, ip)
         if dp.exists():
             try:
                 dp.unlink()
             except OSError:
                 pass
         self._dirty = False
-        QMessageBox.information(self, "Saved", f"{mask_path}\n{label_meta_path(pr, ip)}")
+        QMessageBox.information(self, "Saved", f"{mask_path}\n{meta_path}")
 
     def _autosave_draft(self) -> None:
         if not self._dirty or not self._project_root or not self._images:
@@ -378,7 +420,12 @@ class LabelingDialog(QDialog):
         if self._mask_preview is None:
             return
         try:
-            save_draft_mask(Path(self._project_root), self._current_image_path(), self._mask_preview)
+            save_draft_mask(
+                Path(self._project_root),
+                self._current_image_path(),
+                self._mask_preview,
+                label_kind=self._current_label_kind(),
+            )
         except OSError:
             pass
 

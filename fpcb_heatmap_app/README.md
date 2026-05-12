@@ -31,15 +31,31 @@ pyinstaller --onefile --windowed main.py --name fpcb-heatmap-app
 Optional nested outputs:
 
 - Check **Nested outputs** and set **Output Folder** to `<project_root>/outputs` so files go to `outputs/overlays/`, `outputs/heatmaps/`, `outputs/segments/`, and `outputs/summary.csv`.
-- Check **Copy labeled crack mask…** to also write `*_gt_mask.png` into `outputs/overlays/` when a label exists (nested mode only).
+- Check **Copy labeled crack mask…** to also write `*_gt_mask.png` (crack) and, when present, `*_gt_lead_mask.png` into `outputs/overlays/` (nested mode only).
 
 ## Labeling + training
 
-See in-app **Help** sections 7–8, or run:
+See in-app **Help** sections 7–9.
+
+**Public lead pre-train** (off-repo bundle with `images/` + `labels/lead_masks/`):
 
 ```bash
-python train.py --project-root <path-to-project>
-python eval.py --project-root <path> --checkpoint checkpoints/crack_deeplab_best.pt
+python pretrain_lead_public.py --public-root <path-to-bundle>
+```
+
+**Field training** (from `fpcb_heatmap_app/`):
+
+```bash
+python train.py --project-root <path-to-project> --mode joint
+python train.py --project-root <path> --mode calibrate-lead --init-checkpoint <lead_public_3c_best.pt>
+python eval.py --project-root <path> --checkpoint checkpoints/segmentation_deeplab_3c_best.pt --mode joint
+```
+
+Legacy 2-class crack-only:
+
+```bash
+python train.py --project-root <path> --mode crack
+python eval.py --project-root <path> --checkpoint checkpoints/crack_deeplab_best.pt --mode crack
 ```
 
 ## GitHub Actions EXE Artifact

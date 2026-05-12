@@ -102,27 +102,55 @@ def get_help_sections() -> List[HelpSection]:
                 "Open 'Open labeling…' and select your project ROOT folder (not outputs/).\n"
                 "Click 'Create project folders' once.\n"
                 "Put raw microscopy files under: <project>/images/\n"
+                "Mask type (dropdown):\n"
+                "- Crack → saves labels/masks/<name>.png + labels/meta/<name>.json\n"
+                "- Lead (copper wire) → saves labels/masks/<name>_lead.png + labels/meta/<name>_lead.json\n"
                 "Per image workflow:\n"
-                "- Select 'ROI rect', drag a rectangle around the crack region.\n"
+                "- Select 'ROI rect', drag a rectangle around the region of interest.\n"
                 "- Click 'Init GrabCut'.\n"
-                "- Use FG brush on crack pixels, BG brush on clearly non-crack pixels.\n"
+                "- Use FG brush on foreground pixels, BG brush on clearly background pixels.\n"
                 "- Click 'Refine' as needed.\n"
-                "- Click 'Save label' → writes labels/masks/<name>.png + labels/meta/<name>.json\n"
-                "Draft masks auto-save every ~15s to labels/masks/<name>_draft.png while editing.\n"
+                "- Click 'Save label'.\n"
+                "Draft masks auto-save every ~15s:\n"
+                "- Crack: labels/masks/<name>_draft.png\n"
+                "- Lead: labels/masks/<name>_lead_draft.png\n"
             ),
         ),
         HelpSection(
             title="8) Training / evaluation (CLI)",
             body=(
-                "After you have pairs: images/<file>.png and labels/masks/<same-stem>.png\n"
-                "Run from the fpcb_heatmap_app folder:\n"
-                "  python train.py --project-root <path-to-project>\n"
-                "Checkpoint: <project>/checkpoints/crack_deeplab_best.pt\n"
+                "Crack-only (legacy 2-class):\n"
+                "  python train.py --project-root <path> --mode crack\n"
+                "  → checkpoints/crack_deeplab_best.pt\n"
+                "Joint 3-class (background / lead / crack) — needs crack mask per image; optional *_lead.png:\n"
+                "  python train.py --project-root <path> --mode joint\n"
+                "  → checkpoints/segmentation_deeplab_3c_best.pt\n"
+                "On-site lead calibration (short fine-tune, backbone frozen):\n"
+                "  python train.py --project-root <path> --mode calibrate-lead --init-checkpoint <public_pretrain.pt>\n"
+                "  → checkpoints/lead_calibrated_3c_best.pt\n"
                 "Evaluate:\n"
-                "  python eval.py --project-root <path> --checkpoint <path-to-pt>\n"
+                "  python eval.py --project-root <path> --checkpoint <path-to-pt> --mode joint\n"
+                "  (use --mode crack for old 2-class checkpoints)\n"
                 "Use the checkpoint in the main window 'Model Checkpoint (optional)' field.\n"
                 "Optional: enable 'Nested outputs' and set Output Folder to <project>/outputs\n"
                 "  so overlays/heatmaps/segments/ and summary.csv are organized under outputs/.\n"
+            ),
+        ),
+        HelpSection(
+            title="9) Public pre-training for lead (recommended)",
+            body=(
+                "Lead (copper) has strong reflectance and straight edges; learn it once on public imagery, then\n"
+                "only calibrate lightly on each line-side PC.\n\n"
+                "Prepare a folder (NOT inside git) like:\n"
+                "  <bundle>/images/<name>.png\n"
+                "  <bundle>/labels/lead_masks/<name>.png   (255 = lead)\n"
+                "Run:\n"
+                "  python pretrain_lead_public.py --public-root <bundle>\n"
+                "Output defaults to: <bundle>/checkpoints/lead_public_3c_best.pt\n\n"
+                "Then on the factory project:\n"
+                "  1) Label a small set of *_lead.png for local reflectance.\n"
+                "  2) python train.py --mode calibrate-lead --init-checkpoint <bundle>/checkpoints/lead_public_3c_best.pt ...\n"
+                "  3) Optionally train joint 3-class with crack masks: train.py --mode joint\n"
             ),
         ),
     ]

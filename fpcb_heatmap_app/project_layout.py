@@ -123,3 +123,8 @@ def label_meta_path(project_root: Path, image_path: Path) -> Path:
     # but Phase 1 assumes one canonical images/ folder to avoid ambiguity.
     return project_root / "labels" / "meta" / f"{image_path.stem}.json"
 
+
+def label_meta_path_lead(project_root: Path, image_path: Path) -> Path:
+    """Sidecar JSON for copper-lead masks (`labels/masks/<stem>_lead.png`)."""
+    return project_root / "labels" / "meta" / f"{image_path.stem}_lead.json"
+

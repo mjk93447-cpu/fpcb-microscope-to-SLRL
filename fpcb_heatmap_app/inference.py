@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import cv2
 import numpy as np
@@ -28,12 +29,33 @@ class InferenceOutput:
     crack_score: float
 
 
+def _state_dict_from_checkpoint(ck: Any) -> dict[str, Any]:
+    if isinstance(ck, dict) and "state_dict" in ck:
+        return ck["state_dict"]
+    if isinstance(ck, dict):
+        return ck
+    return {}
+
+
+def _infer_num_classes_from_state(sd: dict[str, Any], ck_meta: dict[str, Any]) -> int:
+    nc = ck_meta.get("num_classes")
+    if nc in (2, 3):
+        return int(nc)
+    w = None
+    for k, v in sd.items():
+        if k.endswith("classifier.4.weight") and hasattr(v, "shape"):
+            w = v
+            break
+    if w is not None and len(w.shape) >= 1:
+        return int(w.shape[0])
+    return 2
+
+
 class SegmentationInference:
     """
     DL-assisted inference for lead/crack masks.
-    - If checkpoint exists: expects output tensor [B, 2, H, W].
-    - Otherwise: uses torchvision Deeplab backbone as a generic feature prior
-      and derives lead/crack masks through thresholded responses.
+    - 3-class checkpoint (recommended): logits order background / lead / crack.
+    - 2-class legacy: background / crack; lead map falls back to OpenCV heuristics.
     """
 
     def __init__(
@@ -47,6 +69,7 @@ class SegmentationInference:
         self.device = "cpu"
         self.model = None
         self.transform = None
+        self._num_classes = 2
 
         if torch is None:
             return
@@ -63,26 +86,38 @@ class SegmentationInference:
             ]
         )
 
-        self.model = self._build_model(checkpoint_path, use_torch_backbone)
+        self.model, self._num_classes = self._build_model(checkpoint_path, use_torch_backbone)
         if self.model is not None:
             self.model.to(self.device)
             self.model.eval()
 
     def _build_model(self, checkpoint_path: Optional[str], use_torch_backbone: bool):
         if deeplabv3_resnet50 is None or torch is None:
-            return None
+            return None, 2
 
         weights = DeepLabV3_ResNet50_Weights.DEFAULT if use_torch_backbone else None
         model = deeplabv3_resnet50(weights=weights)
-        model.classifier[4] = torch.nn.Conv2d(256, 2, kernel_size=1)
 
+        num_classes = 2
+        ck_meta: dict[str, Any] = {}
         if checkpoint_path:
-            state = torch.load(checkpoint_path, map_location="cpu")
-            if "state_dict" in state:
-                state = state["state_dict"]
-            model.load_state_dict(state, strict=False)
+            p = Path(checkpoint_path)
+            if p.is_file():
+                state_obj = torch.load(str(p), map_location="cpu")
+                sd = _state_dict_from_checkpoint(state_obj)
+                if isinstance(state_obj, dict):
+                    ck_meta = state_obj.get("meta") or {}
+                    if not isinstance(ck_meta, dict):
+                        ck_meta = {}
+                num_classes = _infer_num_classes_from_state(sd, ck_meta)
+                model.classifier[4] = torch.nn.Conv2d(256, num_classes, kernel_size=1)
+                model.load_state_dict(sd, strict=False)
+            else:
+                model.classifier[4] = torch.nn.Conv2d(256, 2, kernel_size=1)
+        else:
+            model.classifier[4] = torch.nn.Conv2d(256, 2, kernel_size=1)
 
-        return model
+        return model, num_classes
 
     def predict(self, image_bgr: np.ndarray) -> InferenceOutput:
         if self.model is None or torch is None or self.transform is None:
@@ -95,16 +130,25 @@ class SegmentationInference:
             logits = self.model(tensor)["out"]
             prob = torch.softmax(logits, dim=1)[0].detach().cpu().numpy()
 
-        lead_prob = prob[0]
+        if self._num_classes >= 3:
+            lead_prob = prob[1]
+            crack_prob = prob[2]
+            lead_mask = (lead_prob >= self.confidence_threshold).astype(np.uint8) * 255
+            crack_mask = (crack_prob >= self.confidence_threshold).astype(np.uint8) * 255
+            return InferenceOutput(
+                lead_mask=lead_mask,
+                crack_mask=crack_mask,
+                lead_score=float(np.mean(lead_prob)),
+                crack_score=float(np.mean(crack_prob)),
+            )
+
         crack_prob = prob[1]
-
-        lead_mask = (lead_prob >= self.confidence_threshold).astype(np.uint8) * 255
         crack_mask = (crack_prob >= self.confidence_threshold).astype(np.uint8) * 255
-
+        fb = self._cv_fallback(image_bgr)
         return InferenceOutput(
-            lead_mask=lead_mask,
+            lead_mask=fb.lead_mask,
             crack_mask=crack_mask,
-            lead_score=float(np.mean(lead_prob)),
+            lead_score=fb.lead_score,
             crack_score=float(np.mean(crack_prob)),
         )
 
@@ -113,7 +157,6 @@ class SegmentationInference:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
 
-        # Lead prior: bright elongated structures
         lead_mask = cv2.adaptiveThreshold(
             enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, -4
         )
@@ -121,7 +164,6 @@ class SegmentationInference:
             lead_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations=1
         )
 
-        # Crack prior: dark thin discontinuities highlighted by blackhat + edges
         blackhat = cv2.morphologyEx(enhanced, cv2.MORPH_BLACKHAT, np.ones((7, 7), np.uint8))
         edges = cv2.Canny(blackhat, 30, 120)
         crack_mask = cv2.morphologyEx(
@@ -138,5 +180,4 @@ class SegmentationInference:
     def info(self) -> Dict[str, str]:
         if self.model is None:
             return {"engine": "opencv-fallback", "device": "cpu"}
-        return {"engine": "torch-deeplab", "device": self.device}
-
+        return {"engine": "torch-deeplab", "device": self.device, "num_classes": str(self._num_classes)}
